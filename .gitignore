@@ -1,0 +1,11 @@
+**/data
+**data
+model
+*venv/
+myvenv/
+result_images/
+result_lcs/
+**backup/
+**.zip
+LCS**/
+**graphs/
