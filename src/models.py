@@ -74,8 +74,8 @@ class AutoEncoder(nn.Module):
 
     def __init__(self, num_feature, output_feature=0, latent_dim=4, hidden_dim=8, activation='leaky_relu', initialization='xavier_normal', logit=False, **kwargs) -> None:
         super().__init__()
-        self.name = 'AE'
-        self.num_feature, self.latent_dim, self.initialization, self.logit = num_feature, latent_dim, initialization, logit
+        self.name = 'AE' # name
+        self.num_feature, self.latent_dim, self.initialization, self.logit = num_feature, latent_dim, initialization, logit # arguments
         self.output_feature = num_feature if output_feature == 0 else output_feature
         if logit:
             self.output_feature = 1
@@ -84,6 +84,7 @@ class AutoEncoder(nn.Module):
         self.getQ = nn.Linear(num_feature, self.queryDim, bias=True)
         self.getK = nn.Linear(num_feature, self.queryDim, bias=True)
         self.getV = nn.Linear(num_feature, self.valueDim, bias=True)
+        self.error = None # extra error terms, if applicable
         self.NS = False
         self.naiveScaler= nn.Parameter(torch.diag(torch.rand(self.num_feature))) if self.NS else torch.diag(torch.ones(self.num_feature))
         self.transformerAttention = False
@@ -195,7 +196,8 @@ class AutoEncoder(nn.Module):
         return x
     
     def encode(self, x):
-        x = torch.matmul(x, self.naiveScaler)
+        if self.NS:
+            x = torch.matmul(x, self.naiveScaler)
         if self.transformerAttention:
             x = self.transformer(x)
         return self.encoding_layer(x)
@@ -255,6 +257,7 @@ class VAE(AutoEncoder):
         L = torch.linalg.cholesky(Sigma)# compute Cholesky decomposition for reparameterization
         sample = torch.mul(L, eps) + Mu
         self.KLD = torch.distributions.kl.kl_divergence(p, self.standard_multivariateNormal) # KL divergence with N(0, I)
+        self.error = self.sigma * self.KLD.sum()
         return sample
         
     def encode(self, x):
@@ -711,6 +714,45 @@ class PEA(nn.Module):
             for i, _ in enumerate(x):
                 x_clone[i:i+1] = self.forward(x[i:i+1])
         return x_clone    
+    
+# Restricted Boltzmann Machine
+class RBM(nn.Module):
+    def _init_weights(self, module):
+        if self.initialization == 'kaiming_normal':
+            torch.nn.init.kaiming_normal_(module.weight.data, a=0, mode='fan_in', nonlinearity='leaky_relu')
+        elif self.initialization == 'xavier_normal':
+            torch.nn.init.xavier_normal_(module.weight, gain=torch.nn.init.calculate_gain(nonlinearity='linear'))
+        elif self.initialization == 'ones':
+            torch.nn.init.ones_(module.weight)
+        elif self.initialization == 'zeros':
+            torch.nn.init.zeros_(module.weight)
+        if module.bias is not None:
+            module.bias.data.zero_()
+    
+    def __init__(self, num_feature, latent_dim:int=8, initialization='xavier_normal', **kwargs) -> None:
+        super().__init__()
+        self.name = 'RBM'
+        self.num_feature, self.latent_dim, self.initialization = num_feature, latent_dim, initialization
+        self.W = nn.Linear(num_feature, latent_dim, False)
+        self.H = nn.Parameter(torch.rand(1, self.latent_dim))
+        self.A, self.B = nn.Linear(num_feature, 1, False), nn.Linear(latent_dim, 1, False)
+        # error term
+        self.error = None
+        # init weights
+        for layer in self.children():
+            self._init_weights(layer)
+            
+    def energy(self, x):
+        return - self.A(x) - self.B(self.H) - torch.matmul(self.W(x), torch.t(self.H))
+        
+    def forward(self, x):
+        E = self.energy(x)
+        P = torch.exp(-E) # n x 1
+        P = torch.sigmoid(P)
+        self.error = torch.sum(-(P))
+        #self.error = -torch.mean(P)
+        return P
+    
         
                 
                 

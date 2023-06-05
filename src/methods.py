@@ -54,7 +54,9 @@ def preProcessData_OneClass(raw_data:np.array, anomalous_data:np.array, split:tu
 
     i, j = math.floor(len_raw_data * proportion_train), math.floor(len_raw_data * (proportion_train + proportion_validation))
     train_data, validation_data, test_data = raw_data[0:i], raw_data[i:j], raw_data[j:]
-    if trim:
+    # trim
+    return_dict["trim_columns_to_save"] = [i for i in range(train_data.shape[-1])]
+    if trim:    
         columns_to_save = []
         # Trim data by filtering out useless features, which are the ones who appear (almost) the same throughout observations
         for i in range(train_data.shape[1]):
@@ -63,11 +65,12 @@ def preProcessData_OneClass(raw_data:np.array, anomalous_data:np.array, split:tu
         print("Untrimmed columns: ", columns_to_save)
         train_data, validation_data, test_data, anomalous_data = train_data[:,columns_to_save], validation_data[:,columns_to_save], test_data[:,columns_to_save], anomalous_data[:,columns_to_save] 
         # save idc
-        return_dict["trim_columns_to_save"] = columns_to_save
+        return_dict["trim_columns_to_save"] = np.array(columns_to_save)
     print('Train data shape after trim: ', train_data.shape)
-    return_dict["trim_columns_to_save"] = [i for i in range(train_data.shape[-1])]
+    # filter corrcoef
+    return_dict["corrcoef_columns_to_save"] = return_dict["trim_columns_to_save"]
     if filterLinearDependencies:
-        i, seq = 0, [i for i in range(train_data.shape[-1])]
+        i, seq = 0, np.arange(train_data.shape[-1])
         while True:
             coef_matrix = abs(np.corrcoef(train_data, rowvar=False) - np.eye(train_data.shape[1])) # corr-coefficient matrix with self coefficient zeroed out
             if i >= coef_matrix.shape[0]:
@@ -78,7 +81,7 @@ def preProcessData_OneClass(raw_data:np.array, anomalous_data:np.array, split:tu
             seq = seq[idc]
             i += 1 # go to next unfiltered feature
         # save idc
-        return_dict["corrcoef_columns_to_save"] = seq
+        return_dict["corrcoef_columns_to_save"] = return_dict["corrcoef_columns_to_save"][seq]
         
     print('Train data shape after filter corrcoef: ', train_data.shape)
     
@@ -204,8 +207,12 @@ def train(model:torch.nn.Module, optimization:str, epochs:int, train_X:torch.ten
                 outputs = model(batch_X) 
             # compute training reconstruction loss
             sm = nn.Softmax(dim=-1)
-            train_loss = criterion(outputs, batch_Y)
-            if model.name == 'VAE':
+            criterion.reduction = 'none'
+            #train_loss = criterion(outputs, batch_Y)
+            train_loss = torch.sum(torch.sum((outputs-batch_Y)**2))
+            if model.error:
+                train_loss += model.error
+            """ if model.name == 'VAE':
                 # add KL loss if model is Variational Auto Encoder
                 train_loss += model.sigma * model.KLD.sum()
             if model.name == 'DOCAE' or model.name == 'DCOCAE' or model.name == 'DSVDE':
@@ -213,7 +220,7 @@ def train(model:torch.nn.Module, optimization:str, epochs:int, train_X:torch.ten
                 train_loss += model.error
             if model.name == 'DSVDD':
                 train_loss = 0
-                train_loss = model.error
+                train_loss = model.error """
             
             if att:
                 for param in model.parameters():
@@ -273,7 +280,10 @@ def test(model:torch.nn.Module, criterion:torch.nn.modules.loss, train_data:torc
         # compute reconstructions
         outputs = model(batch)
         # compute the epoch test loss
-        loss = criterion(outputs, Y).item()
+        if model.error:
+            loss = (criterion(outputs, Y) + model.error).item()
+        else:
+            loss = criterion(outputs, Y).item()
         # append loss and class label
         y_scores_loss = np.append(y_scores_loss, loss) # for ROC and AUC plotting
         y_ground_truth = np.append(y_ground_truth, 0)
