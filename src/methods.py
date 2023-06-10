@@ -7,7 +7,8 @@ import torch.nn.functional as F
 
 from sklearn.manifold import TSNE
 from sklearn import metrics
-from sklearn.preprocessing import RobustScaler, QuantileTransformer, PowerTransformer, MaxAbsScaler, StandardScaler
+from sklearn.preprocessing import RobustScaler, QuantileTransformer, PowerTransformer, MaxAbsScaler, StandardScaler, KBinsDiscretizer
+from datasetPreProcessing import OneHotTransformer
 
 import math
 import os
@@ -42,7 +43,7 @@ def loadData(dataName):
         anomalous_raw = np.loadtxt('../data/network_flow2_attack_data.csv', skiprows=1, delimiter=',')[:,:-1]
     return raw_data, anomalous_raw
 
-def preProcessData_OneClass(raw_data:np.array, anomalous_data:np.array, split:tuple or list=(0.6, 0.2, 0.2), trim:bool=False, trim_threshold:float=0.96, normalize:bool=True, normalization_scheme:str='standard_scaling', cross_validation:bool=True, filterLinearDependencies:bool = True, filter_threshold:float=0.95, removeNoise:bool=False, noise_threshold:float=3, return_dict={}):
+def preProcessData_OneClass(raw_data:np.array, anomalous_data:np.array, split:tuple or list=(0.6, 0.2, 0.2), trim:bool=False, trim_threshold:float=0.96, normalize:bool=True, normalization_scheme:str='standard_scaling', cross_validation:bool=True, filterLinearDependencies:bool = True, filter_threshold:float=0.95, removeNoise:bool=False, noise_threshold:float=3, categorical_data_index=None, discretize=False, return_dict={}, args=None):
 
     if sum(split) != 1:
         return ValueError('\'split\' must sum to 1.')
@@ -54,6 +55,13 @@ def preProcessData_OneClass(raw_data:np.array, anomalous_data:np.array, split:tu
 
     i, j = math.floor(len_raw_data * proportion_train), math.floor(len_raw_data * (proportion_train + proportion_validation))
     train_data, validation_data, test_data = raw_data[0:i], raw_data[i:j], raw_data[j:]
+    
+    # one hot encoding for categorical data
+    if categorical_data_index:
+        transformer = OneHotTransformer(train_data, categorical_data_index)
+        train_data, validation_data, test_data, anomalous_data = transformer.transform(train_data), transformer.transform(validation_data), transformer.transform(test_data), transformer.transform(anomalous_data)
+        train_data, validation_data, test_data, anomalous_data = np.float64(train_data), np.float64(validation_data), np.float64(test_data), np.float64(anomalous_data)
+        print(train_data.dtype)
     # trim
     return_dict["trim_columns_to_save"] = [i for i in range(train_data.shape[-1])]
     if trim:    
@@ -84,8 +92,11 @@ def preProcessData_OneClass(raw_data:np.array, anomalous_data:np.array, split:tu
         return_dict["corrcoef_columns_to_save"] = return_dict["corrcoef_columns_to_save"][seq]
         
     print('Train data shape after filter corrcoef: ', train_data.shape)
-    
-    if normalize:
+    # discretize
+    if discretize:
+        transformer = KBinsDiscretizer(n_bins=[20 for _ in range(train_data.shape[-1])], encode='ordinal').fit(train_data)
+        train_data, validation_data, test_data, anomalous_data = transformer.transform(train_data), transformer.transform(validation_data), transformer.transform(test_data), transformer.transform(anomalous_data)
+    if normalize and not discretize:
         eps = 1e-5 # small constant to prevent divide by zero error
         print('Normalization scheme: ', normalization_scheme)
         if normalization_scheme == 'min_max_scaling':
@@ -207,9 +218,8 @@ def train(model:torch.nn.Module, optimization:str, epochs:int, train_X:torch.ten
                 outputs = model(batch_X) 
             # compute training reconstruction loss
             sm = nn.Softmax(dim=-1)
-            criterion.reduction = 'none'
-            #train_loss = criterion(outputs, batch_Y)
-            train_loss = torch.sum(torch.sum((outputs-batch_Y)**2))
+            train_loss = criterion(outputs, batch_Y)
+            #train_loss = torch.sum(torch.sum((outputs-batch_Y)**2))
             if model.error:
                 train_loss += model.error
             """ if model.name == 'VAE':
@@ -370,8 +380,8 @@ def visualize_loss(loss_test, loss_attack, model_name:str, save:bool=False, save
     ax.set_yscale('log')
     ax.set_title('Reconstruction Error: ' + model_name, fontsize = 18)
     ax.grid()
-    ax.scatter(np.arange(len(loss_test)), loss_test, marker=".").set_label('Normal data')
-    ax.scatter(np.arange(len(loss_attack)), loss_attack, marker="x", alpha=0.4).set_label('Anomalous data')
+    ax.scatter(np.arange(len(loss_test)), loss_test, marker=".", alpha=0.2).set_label('Normal data')
+    ax.scatter(np.arange(len(loss_attack)), loss_attack, marker="x", alpha=0.1).set_label('Anomalous data')
     ax.legend()
     # annotate graph
     x, y, i = 1.5, 1, 1

@@ -204,7 +204,8 @@ class AutoEncoder(nn.Module):
     
     def decode(self, x):
         x = self.decoding_layer(x) if not self.logit else nn.Sigmoid()(self.decoding_layer(x))
-        x = torch.matmul(x, torch.linalg.inv(self.naiveScaler))
+        if self.NS:
+            x = torch.matmul(x, torch.linalg.inv(self.naiveScaler))
         return x
 
     def forward(self, x):
@@ -238,6 +239,7 @@ class VAE(AutoEncoder):
         self.generate_std = nn.Linear(latent_dim, latent_dim)
         self._init_weights(self.generate_mean)
         self._init_weights(self.generate_std)
+        self._init_weights(self.generate_log_var)
     
     def reparameterize(self, mu, var):
         std = torch.sqrt(var) # standard deviation
@@ -245,20 +247,21 @@ class VAE(AutoEncoder):
         # re-parameterization trick, as we introduce a new random eps instead of back-propagate through a random-sampling
         eps = torch.randn_like(std)
         sample = mu + (eps * std) 
-        #self.KLD = -0.5 * torch.sum(1 + torch.log(var) - mu**2 - var)
+        self.KLD = -0.5 * torch.mean(1 + torch.log(var) - mu**2 - var)
         # KL divergence with N(0, I_d), assuming all latent variables are independent
-        self.KLD = 0.5 * self.sigma * torch.sum(torch.log(torch.prod(var, dim=1, keepdim=True)) - self.latent_dim + torch.sum(1/var, dim=1, keepdim=True) + torch.sum(mu**2/var, dim=1, keepdim=True))
+        #self.KLD = 0.5 * self.sigma * torch.sum(torch.log(torch.prod(var, dim=1, keepdim=True)) - self.latent_dim + torch.sum(1/var, dim=1, keepdim=True) + torch.sum(mu**2/var, dim=1, keepdim=True))
+        self.error = self.sigma * self.KLD.sum()
         return sample
 
     # This seems very tricky to implement under current framework of pytorch.    
-    def reparameterize_multivariate(self, Mu, Sigma):
+    """ def reparameterize_multivariate(self, Mu, Sigma):
         p = torch.distributions.multivariate_normal.MultivariateNormal(Mu, Sigma)
         eps = torch.randn_like(Mu) # `randn_like` as we need the same size: B x L
         L = torch.linalg.cholesky(Sigma)# compute Cholesky decomposition for reparameterization
         sample = torch.mul(L, eps) + Mu
         self.KLD = torch.distributions.kl.kl_divergence(p, self.standard_multivariateNormal) # KL divergence with N(0, I)
         self.error = self.sigma * self.KLD.sum()
-        return sample
+        return sample """
         
     def encode(self, x):
         if self.transformerAttention:
@@ -267,7 +270,7 @@ class VAE(AutoEncoder):
             x = torch.tanh(torch.matmul(attention_score, V))
         x = self.encoding_layer(x)
         # simplified distribution generation
-        mu, var = self.generate_mean(x), torch.exp((self.generate_log_var(x)))
+        mu, var = self.generate_mean(x), torch.exp((self.generate_log_var(10*nn.Tanh()(x))))
         return self.reparameterize(mu, var)
 
 class DAE(AutoEncoder):
@@ -358,7 +361,7 @@ class DSVDD(nn.Module):
     def __init__(self, num_feature, output_feature=0, hidden_dim=64, center:torch.Tensor=torch.tensor([[0]]), R:torch.Tensor=torch.tensor(1, dtype=float, requires_grad=True), v=1, gamma=1e-1, activation='leaky_relu', initialization='xavier_normal', **kwargs) -> None:
         super().__init__()
         self.name = 'DSVDD'
-        if not 0 < v <= 10:
+        if not 0 < v <= 100:
             raise ValueError('v must be in range (0, 1]')
         self.num_feature = num_feature
         self.output_feature = num_feature if output_feature == 0 else output_feature
@@ -752,8 +755,36 @@ class RBM(nn.Module):
         self.error = torch.sum(-(P))
         #self.error = -torch.mean(P)
         return P
-    
+   
+# Stacked VAE
+class SVAE(VAE):
+    def __init__(self, num_feature, output_feature=0, latent_dim=16, hidden_dim=8, activation='leaky_relu', initialization='xavier_normal', sigma=1, **kwargs) -> None:
+        super().__init__(num_feature=num_feature, output_feature=output_feature, latent_dim=latent_dim, hidden_dim=hidden_dim, activation=activation, initialization=initialization, sigma=sigma, **kwargs)
+        self.name = 'SVAE'
+        self.submodule1 = VAE(num_feature=latent_dim, latent_dim=latent_dim, activation='leaky_relu', initialization='xavier_normal', sigma=self.sigma,)
+        self.submodule2 = VAE(num_feature=latent_dim, latent_dim=latent_dim, activation='leaky_relu', initialization='xavier_normal', sigma=self.sigma,)
         
+    def encode(self, x):
+        x = self.encoding_layer(x)
+        # distribution generation
+        mu, var = self.generate_mean(x), torch.exp((self.generate_log_var(10*nn.Tanh()(x))))
+        return self.reparameterize(mu, var)
+    
+    def encode_all(self, x):
+        x = self.encode(x)
+        x = self.submodule1.encode(x)
+        x = self.submodule2.encode(x)
+        self.error += self.submodule1.error + self.submodule2.error
+        return x
+    
+    def decode_all(self, x):
+        x = self.submodule2.decode(x)
+        x = self.submodule1.decode(x)
+        x = self.decode(x)
+        return x
+    
+    def forward(self, x):
+        return self.decode_all(self.encode_all(x))
                 
                 
 
