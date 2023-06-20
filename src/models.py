@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import itertools
 
 class AttentionNet(nn.Module):
     def _init_weights(self, module):
@@ -61,6 +62,11 @@ class AttentionNet(nn.Module):
 
 class AutoEncoder(nn.Module):
     def _init_weights(self, module):
+        if isinstance(module, nn.Sequential):
+            for layer in module:
+                self._init_weights(layer)
+        if not isinstance(module, nn.Linear):
+            return
         if self.initialization == 'kaiming_normal':
             torch.nn.init.kaiming_normal_(module.weight.data, a=0, mode='fan_in', nonlinearity='leaky_relu')
         elif self.initialization == 'xavier_normal':
@@ -72,10 +78,10 @@ class AutoEncoder(nn.Module):
         if module.bias is not None:
             module.bias.data.zero_()
 
-    def __init__(self, num_feature, output_feature=0, latent_dim=4, hidden_dim=8, activation='leaky_relu', initialization='xavier_normal', logit=False, **kwargs) -> None:
+    def __init__(self, num_feature, output_feature=0, latent_dim=4, hidden_dim=8, activation='leaky_relu', initialization='xavier_normal', logit=False, layer_config=None, **kwargs) -> None:
         super().__init__()
         self.name = 'AE' # name
-        self.num_feature, self.latent_dim, self.initialization, self.logit = num_feature, latent_dim, initialization, logit # arguments
+        self.num_feature, self.latent_dim, self.hidden_dim, self.initialization, self.logit = num_feature, latent_dim, hidden_dim, initialization, logit # arguments
         self.output_feature = num_feature if output_feature == 0 else output_feature
         if logit:
             self.output_feature = 1
@@ -93,25 +99,29 @@ class AutoEncoder(nn.Module):
             encoding_input_dim = self.valueDim
         else:
             encoding_input_dim = num_feature
-        self.l1 = nn.Linear(encoding_input_dim, hd)
-        self.l2 = nn.Linear(hd, hd)
-        self.l3 = nn.Linear(hd, hd)
-        self.l4 = nn.Linear(hd, latent_dim)
-        self.l5 = nn.Linear(latent_dim, hd)
-        self.l6 = nn.Linear(hd, hd)
-        self.l7 = nn.Linear(hd, hd)
-        self.l8 = nn.Linear(hd, self.output_feature)
-        for layer in self.children():
-            self._init_weights(layer)
-            
-        self.ln1 = nn.LayerNorm(encoding_input_dim)
-        self.ln2 = nn.LayerNorm(hd)
-        self.ln3 = nn.LayerNorm(hd)
-        self.ln5 = nn.LayerNorm(latent_dim)
-        self.ln6 = nn.LayerNorm(hd)
-        self.ln7 = nn.LayerNorm(hd)
-
+        
+        # check if layer config is specified
+        if not layer_config:
+            self.layer_config = [[hidden_dim, hidden_dim, latent_dim, latent_dim], [latent_dim, latent_dim, hidden_dim, hidden_dim]]
+        self.layer_config = [[64, 64, 16, 16, 16, 16, 8, 8], [8, 8, 16, 16, 16, 16, 64, 64]]
+        e_config, d_config = [encoding_input_dim] + self.layer_config[0], self.layer_config[1] + [self.output_feature]
+        e_layers = [nn.Linear(e_config[i], e_config[i+1]) for i, _ in enumerate(e_config[:-1])]
+        d_layers = [nn.Linear(d_config[i], d_config[i+1]) for i, _ in enumerate(d_config[:-1])]
+        e_activation, d_activation = [nn.LeakyReLU(0.1) for _ in range(len(e_layers) - 1)], [nn.LeakyReLU(0.1) for _ in range(len(d_layers) - 1)]
         if activation == 'leaky_relu':
+            e_activation, d_activation = [nn.LeakyReLU(0.1) for _ in range(len(e_layers) - 1)], [nn.LeakyReLU(0.1) for _ in range(len(d_layers) - 1)]
+            # initialize encoder and decoder
+            self.encoding_layer = nn.Sequential(*list(itertools.chain(*itertools.zip_longest(e_layers, e_activation)))[:-1])
+            self.decoding_layer = nn.Sequential(*list(itertools.chain(*itertools.zip_longest(d_layers, d_activation)))[:-1])
+            
+            """ self.l1 = nn.Linear(encoding_input_dim, self.hidden_dim)
+            self.l2 = nn.Linear(self.hidden_dim, self.hidden_dim)
+            self.l3 = nn.Linear(self.hidden_dim, self.hidden_dim)
+            self.l4 = nn.Linear(self.hidden_dim, self.latent_dim)
+            self.l5 = nn.Linear(self.latent_dim, self.hidden_dim)
+            self.l6 = nn.Linear(self.hidden_dim, self.hidden_dim)
+            self.l7 = nn.Linear(self.hidden_dim, self.hidden_dim)
+            self.l8 = nn.Linear(self.hidden_dim, self.output_feature)
             self.encoding_layer = nn.Sequential(
                 self.l1,
                 nn.LeakyReLU(0.1),
@@ -128,8 +138,9 @@ class AutoEncoder(nn.Module):
                 nn.LeakyReLU(0.1),
                 self.l7,
                 nn.LeakyReLU(0.1),
-                self.l8,
-            )
+                self.l8
+            ) """
+            
         elif activation == 'tanh':
             self.encoding_layer = nn.Sequential(
                 self.l1,
@@ -187,7 +198,9 @@ class AutoEncoder(nn.Module):
                 nn.LeakyReLU(0.1),
                 self.l8,
             )
-        #self.decoding_layer.append(nn.LogSoftmax(dim=-1))
+        # initialize all weights
+        for layer in self.children():
+            self._init_weights(layer)
         
     def transformer(self, x):
         Q, K, V = self.getQ(x), self.getK(x), self.getV(x)
@@ -227,8 +240,8 @@ class Discriminator(AutoEncoder):
         return (self.decoding_layer(self.encoding_layer(x)))
 
 class VAE(AutoEncoder):
-    def __init__(self, num_feature, output_feature=0, latent_dim=4, hidden_dim=8, activation='leaky_relu', initialization='xavier_normal', sigma=1, **kwargs) -> None:
-        super().__init__(num_feature=num_feature, output_feature=output_feature, latent_dim=latent_dim, hidden_dim=hidden_dim, activation=activation, initialization=initialization)
+    def __init__(self, num_feature, output_feature=0, latent_dim=4, hidden_dim=8, activation='leaky_relu', initialization='xavier_normal', sigma=1, layer_config=None, **kwargs) -> None:
+        super().__init__(num_feature=num_feature, output_feature=output_feature, latent_dim=latent_dim, hidden_dim=hidden_dim, activation=activation, initialization=initialization, layer_config=layer_config)
         self.name = 'VAE'
         self.num_feature, self.latent_dim, self.sigma, self.initialization = num_feature, latent_dim, sigma, initialization
         self.hd = hd = hidden_dim
@@ -758,11 +771,11 @@ class RBM(nn.Module):
    
 # Stacked VAE
 class SVAE(VAE):
-    def __init__(self, num_feature, output_feature=0, latent_dim=16, hidden_dim=8, activation='leaky_relu', initialization='xavier_normal', sigma=1, **kwargs) -> None:
-        super().__init__(num_feature=num_feature, output_feature=output_feature, latent_dim=latent_dim, hidden_dim=hidden_dim, activation=activation, initialization=initialization, sigma=sigma, **kwargs)
+    def __init__(self, num_feature, output_feature=0, latent_dim=16, hidden_dim=8, activation='leaky_relu', initialization='xavier_normal', sigma=1, layer_config=[[16, 16, 16, 8], [8, 16, 16, 16]], **kwargs) -> None:
+        super().__init__(num_feature=num_feature, output_feature=output_feature, latent_dim=latent_dim, hidden_dim=hidden_dim, activation=activation, initialization=initialization, sigma=sigma, layer_config=layer_config, **kwargs)
         self.name = 'SVAE'
-        self.submodule1 = VAE(num_feature=latent_dim, latent_dim=latent_dim, activation='leaky_relu', initialization='xavier_normal', sigma=self.sigma,)
-        self.submodule2 = VAE(num_feature=latent_dim, latent_dim=latent_dim, activation='leaky_relu', initialization='xavier_normal', sigma=self.sigma,)
+        self.submodule1 = VAE(num_feature=latent_dim, latent_dim=latent_dim, activation='leaky_relu', initialization='xavier_normal', sigma=self.sigma, layer_config=layer_config)
+        self.submodule2 = VAE(num_feature=latent_dim, latent_dim=latent_dim, activation='leaky_relu', initialization='xavier_normal', sigma=self.sigma, layer_config=layer_config)
         
     def encode(self, x):
         x = self.encoding_layer(x)
@@ -786,5 +799,24 @@ class SVAE(VAE):
     def forward(self, x):
         return self.decode_all(self.encode_all(x))
                 
-                
+# Stacked AE
+class SAE(nn.Module):
+    def __init__(self, num_feature, output_feature=0, latent_dim=8, hidden_dim=16, activation='leaky_relu', initialization='xavier_normal', layer_config=[[16, 16, 16, 8], [8, 16, 16, 16]], **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.name = 'SAE'
+        self.num_feature, self.latent_dim, self.hidden_dim, self.initialization = num_feature, latent_dim, hidden_dim, initialization # arguments
+        self.output_feature = num_feature if output_feature == 0 else output_feature
+        self.submodule1 = AutoEncoder(num_feature=num_feature, latent_dim=latent_dim, hidden_dim=hidden_dim, output_feature=output_feature, activation=activation, initialization=initialization, layer_config=layer_config)
+        self.submodule2 = AutoEncoder(num_feature=2*self.submodule1.output_feature, latent_dim=latent_dim, hidden_dim=hidden_dim, activation=activation, initialization=initialization, layer_config=layer_config)
+        self.submodule3 = AutoEncoder(num_feature=2*self.submodule2.output_feature, output_feature=num_feature, latent_dim=latent_dim*2, hidden_dim=hidden_dim, activation=activation, initialization=initialization, layer_config=layer_config)
+        self.submodule_list = []
+        self.error = None
+        
+    def forward(self, x):
+        output = self.submodule1(x)
+        x = torch.concat((x, output), dim=-1)
+        output = self.submodule2(x)
+        x = torch.concat((x, output), dim=-1)
+        output = self.submodule3(x)
+        return output            
 

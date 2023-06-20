@@ -9,6 +9,7 @@ from sklearn.manifold import TSNE
 from sklearn import metrics
 from sklearn.preprocessing import RobustScaler, QuantileTransformer, PowerTransformer, MaxAbsScaler, StandardScaler, KBinsDiscretizer
 from datasetPreProcessing import OneHotTransformer
+from imblearn.over_sampling import RandomOverSampler
 
 import math
 import os
@@ -151,8 +152,8 @@ def preProcessData_OneClass(raw_data:np.array, anomalous_data:np.array, split:tu
     print('Train data shape after normalize: ', train_data.shape)
     return train_data, validation_data, test_data, anomalous_data
 
-def preProcessData_LogisticRegression(raw_data:np.array, anomalous_data:np.array, split:tuple or list=(0.6, 0.2, 0.2), trim:bool=False, trim_threshold:float=0.96, normalize:bool=True, cross_validation:bool=True, filterLinearDependencies:bool = True, filter_threshold:float=0.95, removeNoise:bool=False, noise_threshold:float=3, train_proportion=0.8, normalization_scheme='standard_scaling'):   
-    train_data, validation_data, test_data, a_data = preProcessData_OneClass(raw_data, anomalous_data, split=split, trim=trim, trim_threshold=trim_threshold, normalize=normalize, normalization_scheme=normalization_scheme, cross_validation=cross_validation, filterLinearDependencies = filterLinearDependencies, filter_threshold=filter_threshold, removeNoise=removeNoise, noise_threshold=noise_threshold)
+def preProcessData_LogisticRegression(raw_data:np.array, anomalous_data:np.array, split:tuple or list=(0.6, 0.2, 0.2), trim:bool=False, trim_threshold:float=0.96, normalize:bool=True, cross_validation:bool=True, filterLinearDependencies:bool = True, filter_threshold:float=0.95, removeNoise:bool=False, noise_threshold:float=3, train_proportion=0.8, normalization_scheme='standard_scaling', categorical_data_index=None, over_sampling=True):   
+    train_data, validation_data, test_data, a_data = preProcessData_OneClass(raw_data, anomalous_data, split=split, trim=trim, trim_threshold=trim_threshold, normalize=normalize, normalization_scheme=normalization_scheme, cross_validation=cross_validation, filterLinearDependencies = filterLinearDependencies, filter_threshold=filter_threshold, removeNoise=removeNoise, noise_threshold=noise_threshold, categorical_data_index=categorical_data_index)
     train_data = np.concatenate((train_data, validation_data, test_data), axis=0)
     train_data = np.concatenate((train_data, np.zeros((train_data.shape[0], 1))), axis=1)
     a_data = np.concatenate((a_data, np.ones((a_data.shape[0], 1))), axis=1)
@@ -162,6 +163,13 @@ def preProcessData_LogisticRegression(raw_data:np.array, anomalous_data:np.array
     #
     train_X, train_Y = raw_data[0:math.floor(len(raw_data) * train_proportion)][:,:-1], raw_data[0:math.floor(len(raw_data) * train_proportion)][:,-1:]
     test_X, test_Y = raw_data[math.floor(len(raw_data) * train_proportion):][:,:-1], raw_data[math.floor(len(raw_data) * train_proportion):][:,-1:]
+    # resample
+    if over_sampling:
+        ros = RandomOverSampler(random_state=0)
+        train_X, train_Y = ros.fit_resample(train_X, train_Y)
+        train_Y = train_Y.reshape((train_Y.shape[0], 1))
+    print("train_X, train_Y shape:", train_X.shape, train_Y.shape)
+    print("test_X, test_Y shape:", test_X.shape, test_Y.shape)
     return train_X, train_Y, test_X, test_Y
 
 def train(model:torch.nn.Module, optimization:str, epochs:int, train_X:torch.tensor, train_Y:torch.tensor, 
