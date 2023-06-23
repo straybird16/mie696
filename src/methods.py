@@ -493,6 +493,37 @@ def visualize_ROC(y_ground_truth, model_name:str, save:bool, scores, save_path:s
             i += 1
         fig.savefig(pathfile, bbox_inches='tight')
     
+def visualize_curve(metrics, save:bool=False, title:str='', x_label='', y_label='', save_path:str="../graphs/curve", **kwargs):
+    fig = plt.figure(figsize = (10,10))
+    ax = fig.add_subplot(1,1,1)
+    
+    ax.set_title(title, fontsize = 18)
+    for key, (x, y) in metrics.items():
+        ax.plot(x, y, label= str(key))
+    plt.xticks(np.arange(0,1.05, step=0.1))
+    plt.yticks(np.arange(0,1.05, step=0.1))
+    plt.grid(visible=True)
+    ax.set_xlabel(x_label, fontsize=15)
+    ax.set_ylabel(y_label, fontsize=15)
+    
+    ax.legend(loc=4)
+    # annotate graph
+    x, y, i = 1.5, 1, 1
+    for key, value in kwargs.items():
+        ax.text(x, y, str(key) + " = " + str(value), ha='right', va='top', transform = ax.transAxes)
+        y -= 0.05
+    # save graph
+    if save:
+        path = save_path
+        filename = title
+        pathfile = os.path.normpath(os.path.join(path, filename))
+        if not os.path.exists(path):
+            os.makedirs(path)
+        while os.path.isfile(pathfile + '.png'):
+            pathfile = os.path.normpath(os.path.join(path, filename + str(i)))
+            i += 1
+        fig.savefig(pathfile, bbox_inches='tight')
+    
 def plot_bar(data:dict, model_name:str, save:bool=False, save_path='../graphs/sensitivity_specificity', **kwargs):
     items, values = list(data.keys()), list(data.values())
     fig = plt.figure(figsize = (6,6))

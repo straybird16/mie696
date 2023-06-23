@@ -87,19 +87,19 @@ class AutoEncoder(nn.Module):
             self.output_feature = 1
         self.hd = hd = hidden_dim
         self.queryDim, self.valueDim = 10, num_feature
-        self.getQ = nn.Linear(num_feature, self.queryDim, bias=True)
+        """ self.getQ = nn.Linear(num_feature, self.queryDim, bias=True)
         self.getK = nn.Linear(num_feature, self.queryDim, bias=True)
-        self.getV = nn.Linear(num_feature, self.valueDim, bias=True)
+        self.getV = nn.Linear(num_feature, self.valueDim, bias=True) """
         self.error = None # extra error terms, if applicable
         self.NS = False
         self.naiveScaler= nn.Parameter(torch.diag(torch.rand(self.num_feature))) if self.NS else torch.diag(torch.ones(self.num_feature))
-        self.transformerAttention = False
+        """ self.transformerAttention = False
 
         if self.transformerAttention:
             encoding_input_dim = self.valueDim
         else:
-            encoding_input_dim = num_feature
-        
+            encoding_input_dim = num_feature """
+        encoding_input_dim = num_feature
         # check if layer config is specified
         if not layer_config:
             self.layer_config = [[hidden_dim, hidden_dim, latent_dim, latent_dim], [latent_dim, latent_dim, hidden_dim, hidden_dim]]
@@ -211,8 +211,8 @@ class AutoEncoder(nn.Module):
     def encode(self, x):
         if self.NS:
             x = torch.matmul(x, self.naiveScaler)
-        if self.transformerAttention:
-            x = self.transformer(x)
+        """ if self.transformerAttention:
+            x = self.transformer(x) """
         return self.encoding_layer(x)
     
     def decode(self, x):
