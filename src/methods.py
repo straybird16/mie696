@@ -4,6 +4,7 @@ import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt 
 import torch.nn.functional as F
+from scipy import interpolate
 
 from sklearn.manifold import TSNE
 from sklearn import metrics
@@ -11,6 +12,7 @@ from sklearn.preprocessing import RobustScaler, QuantileTransformer, PowerTransf
 from datasetPreProcessing import OneHotTransformer
 from imblearn.over_sampling import RandomOverSampler
 
+import time
 import math
 import os
 import copy
@@ -64,7 +66,7 @@ def preProcessData_OneClass(raw_data:np.array, anomalous_data:np.array, split:tu
         train_data, validation_data, test_data, anomalous_data = np.float64(train_data), np.float64(validation_data), np.float64(test_data), np.float64(anomalous_data)
         print(train_data.dtype)
     # trim
-    return_dict["trim_columns_to_save"] = [i for i in range(train_data.shape[-1])]
+    return_dict["trim_columns_to_save"] = np.array([i for i in range(train_data.shape[-1])])
     if trim:    
         columns_to_save = []
         # Trim data by filtering out useless features, which are the ones who appear (almost) the same throughout observations
@@ -186,6 +188,7 @@ def train(model:torch.nn.Module, optimization:str, epochs:int, train_X:torch.ten
     if att:
         optimizer_att = torch.optim.SGD(att.parameters(), lr=lr, weight_decay=weight_decay)
         att.initAllWeights()
+    curr_time = time.time()
     for epoch in range(epochs):
         if att:
             optimizer_att.zero_grad()
@@ -260,6 +263,7 @@ def train(model:torch.nn.Module, optimization:str, epochs:int, train_X:torch.ten
         loss /= l
         loss_list.append(loss)
         print("epoch : {}/{}, loss = {:.6f}".format(epoch + 1, epochs, loss))
+    print("Train time: {:.4f} seconds.".format(time.time()-curr_time))
     return loss_list
 
 def validate():
@@ -345,6 +349,22 @@ def test(model:torch.nn.Module, criterion:torch.nn.modules.loss, train_data:torc
     y_scores_lcs = torch.cat((y_scores_lcs, torch.sum((torch.square(lcs_array_attack - lcs_mean)), dim=1, keepdim=False))).detach().numpy()
     lcs_array_attack = lcs_array_attack.numpy()
     return loss_test, loss_attack, kl_div_test, kl_div_attack, y_scores_loss, y_scores_lcs, y_ground_truth, lcs_array_test, lcs_array_attack
+
+def test_light(model:torch.nn.Module, criterion:torch.nn.modules.loss, train_data:torch.Tensor, test_data:torch.Tensor, anomalous_data:torch.Tensor):
+    # start eval mode
+    model.eval()
+    #loss_test, loss_attack = np.array([]), np.array([])
+    original_reduction = criterion.reduction
+    criterion.reduction = 'none'
+    # test loss
+    loss_test = torch.sum(criterion(model(test_data), test_data), dim=-1)
+    loss_test = loss_test.detach().numpy()
+    # attack loss
+    loss_attack = torch.sum(criterion(model(anomalous_data), anomalous_data), dim=-1)
+    loss_attack = loss_attack.detach().numpy()
+
+    criterion.reduction = original_reduction
+    return loss_test, loss_attack
 
 def test_classification(model:torch.nn.Module, criterion:torch.nn.modules.loss, test_X:torch.Tensor, test_Y:torch.Tensor):
     # start eval mode
@@ -499,7 +519,9 @@ def visualize_curve(metrics, save:bool=False, title:str='', x_label='', y_label=
     
     ax.set_title(title, fontsize = 18)
     for key, (x, y) in metrics.items():
-        ax.plot(x, y, label= str(key))
+        # smooth curve
+        ax.plot(x, y, label= str(key), alpha=0.5,)
+    
     plt.xticks(np.arange(0,1.05, step=0.1))
     plt.yticks(np.arange(0,1.05, step=0.1))
     plt.grid(visible=True)
@@ -523,7 +545,31 @@ def visualize_curve(metrics, save:bool=False, title:str='', x_label='', y_label=
             pathfile = os.path.normpath(os.path.join(path, filename + str(i)))
             i += 1
         fig.savefig(pathfile, bbox_inches='tight')
-    
+
+def visualize_bar(data:dict, save:bool=False, title:str='Bar Plot', save_path:str="../graphs/bar_plot", **kwargs):
+    fig = plt.figure(figsize = (7,7))
+    ax = fig.add_subplot(1,1,1)
+    ax.set_title(title, fontsize = 18)
+    x, y = list(data.keys()), list(data.values())
+    ax.barh(x, y, 
+            #color=['black', 'red', 'green', 'blue', 'cyan', 'brown', 'yellow', 'pink', 'purple', 'tan']
+            )
+    ax.set_xscale('log')
+    # show values
+    """ for index, value in enumerate(y):
+        ax.text(value, index, str(value)[:6], horizontalalignment='left') """
+    i = 1
+    if save:
+        path = save_path
+        filename = title
+        pathfile = os.path.normpath(os.path.join(path, filename))
+        if not os.path.exists(path):
+            os.makedirs(path)
+        while os.path.isfile(pathfile + '.png'):
+            pathfile = os.path.normpath(os.path.join(path, filename + str(i)))
+            i += 1
+        fig.savefig(pathfile, bbox_inches='tight')
+   
 def plot_bar(data:dict, model_name:str, save:bool=False, save_path='../graphs/sensitivity_specificity', **kwargs):
     items, values = list(data.keys()), list(data.values())
     fig = plt.figure(figsize = (6,6))

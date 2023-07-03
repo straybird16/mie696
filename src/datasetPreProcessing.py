@@ -70,10 +70,20 @@ def LoadDatasetByName(DATASET, *args):
         #features = np.loadtxt('../data/creditcard_attack_data.csv', max_rows=1, delimiter=',', dtype=str)
     elif DATASET == 'TON_IoT_data':
         index = [0,1,2,6,12,13,14,17]
-        raw_data = np.loadtxt('../data/TON_IoT_regular_data.csv', skiprows=1, delimiter=',', dtype=str, usecols=[i for i in range(18) if i not in index])[:,:-2]
-        anomalous_raw = np.loadtxt('../data/TON_IoT_attack_data.csv', skiprows=1, delimiter=',', dtype=str, usecols=[i for i in range(18) if i not in index])[:,:-2]
-        
+        index_used = [2,3,4,5,7,8,9,10,11,15,16]
+        #raw_data = np.loadtxt('../data/TON_IoT_regular_data.csv', skiprows=1, delimiter=',', dtype=str, usecols=index_used)[:,:-2]
+        #anomalous_raw = np.loadtxt('../data/TON_IoT_attack_data.csv', skiprows=1, delimiter=',', dtype=str, usecols=index_used)[:,:-2]
+        raw_data = np.loadtxt('../data/TON_IoT_regular_data.csv', skiprows=1, delimiter=',', dtype=str, usecols=index_used)
+        anomalous_raw = np.loadtxt('../data/TON_IoT_attack_data.csv', skiprows=1, delimiter=',', dtype=str, usecols=index_used)
+        categorical_data_index = [0]
         #features = np.loadtxt('../data/TON_IoT_data_attack_data.csv', max_rows=1, delimiter=',', dtype=str)
+    elif DATASET == 'TON_IoT_full_data':
+        index_used = [i for i in range(2, 18)]
+        #raw_data = np.loadtxt('../data/TON_IoT_regular_data.csv', skiprows=1, delimiter=',', dtype=str, usecols=index_used)[:,:-2]
+        #anomalous_raw = np.loadtxt('../data/TON_IoT_attack_data.csv', skiprows=1, delimiter=',', dtype=str, usecols=index_used)[:,:-2]
+        raw_data = np.loadtxt('../data/TON_IoT_regular_data.csv', skiprows=1, delimiter=',', dtype=str, usecols=index_used)
+        anomalous_raw = np.loadtxt('../data/TON_IoT_attack_data.csv', skiprows=1, delimiter=',', dtype=str, usecols=index_used)
+        categorical_data_index = [0,4,10,11,12,15]
     # return loaded data
     return raw_data, anomalous_raw, features, categorical_data_index
 
