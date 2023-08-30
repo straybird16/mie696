@@ -17,6 +17,10 @@ def LoadDatasetByName(DATASET, *args):
         anomalous_raw = anomalous_raw[idc,:]
         idc = np.bool_(np.loadtxt('../data/idc/data_idc2.csv', delimiter=','))
         anomalous_raw = anomalous_raw[idc,:] """
+    if DATASET == 'network_data_h':
+        #h_indices = [2,4,5,6,7,8]
+        raw_data = np.loadtxt('../data/network_flow_regular_data.csv', skiprows=1, delimiter=',')[:,:-1]
+        anomalous_raw = np.loadtxt('../data/network_flow_attack_data.csv', skiprows=1, delimiter=',')[:,:-1]
         #anomalous_raw = np.loadtxt('../data/network_flow_attack_data_undetected.csv', delimiter=',')[:,:-1]
     elif DATASET == 'medical_data':
         raw_data = np.loadtxt('../data/medical_regular_data.csv', skiprows=1, delimiter=',')[:,:-1]
@@ -54,6 +58,11 @@ def LoadDatasetByName(DATASET, *args):
         raw_data = np.loadtxt('../data/iiot_regular_data.csv', skiprows=1, delimiter=',')[:,:-1]
         anomalous_raw = np.loadtxt('../data/iiot_attack_data.csv', skiprows=1, delimiter=',')[:,:-1]
         features = np.loadtxt('../data/iiot_attack_data.csv', max_rows=1, delimiter=',', dtype=str)
+    elif DATASET == 'iiot_data_h':
+        h_indices = [7,6,9,10,21,22,19,20,24,5,8,11,14]
+        raw_data = np.loadtxt('../data/iiot_regular_data.csv', skiprows=1, delimiter=',')[:,h_indices]
+        anomalous_raw = np.loadtxt('../data/iiot_attack_data.csv', skiprows=1, delimiter=',')[:,h_indices]
+        features = np.loadtxt('../data/iiot_attack_data.csv', max_rows=1, delimiter=',', dtype=str)
     elif DATASET == 'ECU_IoHT_data':
         raw_data = np.loadtxt('../data_backup/ECU_IoHT_regular_data.csv', skiprows=1, delimiter=',', dtype=str)[:,1:-2]
         anomalous_raw = np.loadtxt('../data_backup/ECU_IoHT_attack_data.csv', skiprows=1, delimiter=',', dtype=str)[:,1:-2]
@@ -84,6 +93,9 @@ def LoadDatasetByName(DATASET, *args):
         raw_data = np.loadtxt('../data/TON_IoT_regular_data.csv', skiprows=1, delimiter=',', dtype=str, usecols=index_used)
         anomalous_raw = np.loadtxt('../data/TON_IoT_attack_data.csv', skiprows=1, delimiter=',', dtype=str, usecols=index_used)
         categorical_data_index = [0,4,10,11,12,15]
+    elif DATASET == 'KDD_10':
+        raw_data = np.loadtxt('../data/KDD_10_regular_data.csv', skiprows=1, delimiter=',')
+        anomalous_raw = np.loadtxt('../data/KDD_10_attack_data.csv', skiprows=1, delimiter=',')
     # return loaded data
     return raw_data, anomalous_raw, features, categorical_data_index
 

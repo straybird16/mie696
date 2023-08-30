@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import itertools
+import numpy as np
 from pyod.models import base as pyodBase
 
 class AttentionNet(nn.Module):
@@ -104,7 +105,8 @@ class AutoEncoder(nn.Module):
         encoding_input_dim = num_feature
         # check if layer config is specified
         if not layer_config:
-            self.layer_config = [[64, 64, 16, 16, 16, 16, latent_dim, latent_dim], [latent_dim, latent_dim, 16, 16, 16, 16, 64, 64]]
+            self.layer_config = [[128, hidden_dim, latent_dim], [latent_dim, hidden_dim, 128]]
+            self.layer_config = [[128, 128, 32, 32, hidden_dim, latent_dim], [latent_dim, hidden_dim, 32, 32, 128, 128]]
         else:
             self.layer_config = layer_config
         e_config, d_config = [encoding_input_dim] + self.layer_config[0], self.layer_config[1] + [self.output_feature]
@@ -843,6 +845,7 @@ class FEAE(pyodBase.BaseDetector):
             raise ValueError("n_kernel_dim \'{}\' is not a valid integer".format(n_kernel_dim))
         self.n_heads = n_heads
         self.n_kernel_dim = n_kernel_dim
+        self.criterion = nn.MSELoss(reduction='mean')
         self.FC
         self.device = torch.device(device)
         
@@ -855,23 +858,28 @@ class FEAE(pyodBase.BaseDetector):
                 if i == 0:
                     getQ.extend(nn.Linear(n_feature, n_kernel_dim, bias=False), nn.LeakyReLU(0.1))
                     getK.extend(nn.Linear(n_feature, n_kernel_dim, bias=False), nn.LeakyReLU(0.1))
-                    continue
-                getQ.extend(nn.Linear(n_kernel_dim, n_kernel_dim, bias=False))
-                getK.extend(nn.Linear(n_kernel_dim, n_kernel_dim, bias=False))
+                else:
+                    getQ.extend(nn.Linear(n_kernel_dim, n_kernel_dim, bias=False))
+                    getK.extend(nn.Linear(n_kernel_dim, n_kernel_dim, bias=False))
                 if i == n_layers-1:
                     getQ.extend(nn.LeakyReLU(0.1))
                     getK.extend(nn.LeakyReLU(0.1))
             # append nn.Sequential created from this MLP to the multi-head-attention module list
             self.multi_head_Q.extend(nn.Sequential(*getQ))
             self.multi_head_K.extend(nn.Sequential(*getK))
+        # Permutation-equivariant feature net
         self.PEFN = nn.Sequential(
                 nn.Linear(n_kernel_dim, n_kernel_dim),
                 nn.LeakyReLU(0.1),
                 nn.Linear(n_kernel_dim, 1),
             )
         
+    # helper function to build encoder-decoder network
+    def build_encoder_decoder_(self, n_feature, n_kernel_dim, n_heads:int=1):
+        pass
+        
 
-    def fit(self, X, y=None, n_epochs=1000, lr=1e-3):
+    def fit(self, X, y=None, n_epochs=1000, lr=1e-3, weight_decay:float=1e-6, batch_size:int=512):
         """Fit detector. y is ignored in unsupervised methods.
 
         Parameters
@@ -891,7 +899,7 @@ class FEAE(pyodBase.BaseDetector):
         X = check_array(X)
         self._set_n_classes(y)
         """
-        
+        self.optimizer=torch.optim.SGD(self.parameters(), lr=lr, weight_decay=weight_decay)
         n_samples, n_features = X.shape[0], X.shape[1]
         # convert to torch tensor
         X = torch.tensor(X).to(torch.float32).to(self.device)
@@ -899,10 +907,15 @@ class FEAE(pyodBase.BaseDetector):
         self.build_transformer_(n_feature=n_features, n_kernel_dim=self.n_kernel_dim, n_heads=self.n_heads)
         
         # start training
-        
+        for _ in range(n_epochs):
+            # shuffle train data and train with mini-batches
+            loss, l = 0, len(X)
+            permutation = np.random.permutation(l)
+            for i in range(0, l, batch_size):
+                batch_idc = permutation[i:i+batch_size]
+                batch_X = X[batch_idc,]
+            pass
             
-        
-        
         # train
         return self
         
@@ -915,12 +928,14 @@ class FEAE(pyodBase.BaseDetector):
     def decision_function(self, X):
         pass
     
-    def forward(self, X):
+    def forward_train(self, X):
         # attention mechanism
-        attentions = torch.empty(0)
+        attentions = torch.empty((1, 0))
         for getQ, getK in zip(self.multi_head_Q, self.multi_head_K):
             att = torch.matmul(torch.t(getQ(X)), getK(X)) # k x k
             att = self.PEFN(att) # k x 1
             attentions = torch.concatenate((attentions, att), dim=0)
-            pass
+        attentions = torch.t(attentions) # (h x k) x 1 dimensions
+        
+        X = torch.concatenate((X, attentions), dim=-1)
 

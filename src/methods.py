@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import torch.nn.functional as F
 from scipy import interpolate
 
+from sklearn.model_selection import train_test_split
 from sklearn.manifold import TSNE
 from sklearn import metrics
 from sklearn.preprocessing import RobustScaler, QuantileTransformer, PowerTransformer, MaxAbsScaler, StandardScaler, KBinsDiscretizer
@@ -46,19 +47,18 @@ def loadData(dataName):
         anomalous_raw = np.loadtxt('../data/network_flow2_attack_data.csv', skiprows=1, delimiter=',')[:,:-1]
     return raw_data, anomalous_raw
 
-def preProcessData_OneClass(raw_data:np.array, anomalous_data:np.array, split:tuple or list=(0.6, 0.2, 0.2), trim:bool=False, trim_threshold:float=0.96, normalize:bool=True, normalization_scheme:str='standard_scaling', cross_validation:bool=True, filterLinearDependencies:bool = True, filter_threshold:float=0.95, removeNoise:bool=False, noise_threshold:float=3, categorical_data_index=None, discretize=False, return_dict={}, args=None):
+def preProcessData_OneClass(raw_data:np.array, anomalous_data:np.array, split:tuple or list=(0.8, 0.1, 0.1), trim:bool=False, trim_threshold:float=0.96, normalize:bool=True, normalization_scheme:str='standard_scaling', cross_validation:bool=False, filterLinearDependencies:bool = True, filter_threshold:float=0.98, removeNoise:bool=False, noise_threshold:float=3, categorical_data_index=None, discretize=False, return_dict={}, args=None):
 
     if sum(split) != 1:
         return ValueError('\'split\' must sum to 1.')
     len_raw_data = len(raw_data)
-    proportion_train, proportion_validation = split[0], split[1]
+    
     if cross_validation:
         random_idc = np.random.choice(len_raw_data, len_raw_data, replace=False)
         raw_data = raw_data[random_idc,:]
-
-    i, j = math.floor(len_raw_data * proportion_train), math.floor(len_raw_data * (proportion_train + proportion_validation))
-    train_data, validation_data, test_data = raw_data[0:i], raw_data[i:j], raw_data[j:]
     
+    train_data, test_data = train_test_split(raw_data, train_size=split[0])
+    validation_data, test_data = train_test_split(test_data, train_size= split[1]/(split[1]+split[2]))
     # one hot encoding for categorical data
     if categorical_data_index:
         transformer = OneHotTransformer(train_data, categorical_data_index)
@@ -513,14 +513,18 @@ def visualize_ROC(y_ground_truth, model_name:str, save:bool, scores, save_path:s
             i += 1
         fig.savefig(pathfile, bbox_inches='tight')
     
-def visualize_curve(metrics, save:bool=False, title:str='', x_label='', y_label='', save_path:str="../graphs/curve", **kwargs):
+def visualize_curve(points:dict, save:bool=False, title:str='', x_label='', y_label='', save_path:str="../graphs/curve", highlight=False, *args, **kwargs):
     fig = plt.figure(figsize = (10,10))
     ax = fig.add_subplot(1,1,1)
     
     ax.set_title(title, fontsize = 18)
-    for key, (x, y) in metrics.items():
-        # smooth curve
-        ax.plot(x, y, label= str(key), alpha=0.5,)
+    for key, (x, y) in list(points.items())[:-1]:
+        alpha = 0.5 if highlight else 1
+        ax.plot(x, y, label= str(key)+' auc = {:.4f}'.format(metrics.auc(x, y)), linestyle='-', alpha=alpha, *args)
+    for key, (x, y) in list(points.items())[-1:]:
+        ax.plot(x, y, label= str(key)+' auc = {:.4f}'.format(metrics.auc(x, y)), alpha=1, 
+                #color='darkorchid'
+                )
     
     plt.xticks(np.arange(0,1.05, step=0.1))
     plt.yticks(np.arange(0,1.05, step=0.1))
@@ -546,13 +550,14 @@ def visualize_curve(metrics, save:bool=False, title:str='', x_label='', y_label=
             i += 1
         fig.savefig(pathfile, bbox_inches='tight')
 
-def visualize_bar(data:dict, save:bool=False, title:str='Bar Plot', save_path:str="../graphs/bar_plot", **kwargs):
+def visualize_bar(data:dict, save:bool=False, title:str='Bar Plot', save_path:str="../graphs/bar_plot", highlight=False, **kwargs):
     fig = plt.figure(figsize = (7,7))
     ax = fig.add_subplot(1,1,1)
     ax.set_title(title, fontsize = 18)
     x, y = list(data.keys()), list(data.values())
     ax.barh(x, y, 
             #color=['black', 'red', 'green', 'blue', 'cyan', 'brown', 'yellow', 'pink', 'purple', 'tan']
+            color=['royalblue' for _ in range(len(x)-1)]+['turquoise'] if highlight else None
             )
     ax.set_xscale('log')
     # show values
