@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import itertools
@@ -115,36 +116,15 @@ class AutoEncoder(nn.Module):
         e_activation, d_activation = [nn.LeakyReLU(0.1) for _ in range(len(e_layers) - 1)], [nn.LeakyReLU(0.1) for _ in range(len(d_layers) - 1)]
         if activation == 'leaky_relu':
             e_activation, d_activation = [nn.LeakyReLU(0.1) for _ in range(len(e_layers) - 1)], [nn.LeakyReLU(0.1) for _ in range(len(d_layers) - 1)]
+            e_norm, d_norm = [nn.LayerNorm(n) for n in self.layer_config[0][:-1]], [nn.LayerNorm(n) for n in self.layer_config[1][1:]]
             # initialize encoder and decoder
-            self.encoding_layer = nn.Sequential(*list(itertools.chain(*itertools.zip_longest(e_layers, e_activation)))[:-1])
-            self.decoding_layer = nn.Sequential(*list(itertools.chain(*itertools.zip_longest(d_layers, d_activation)))[:-1])
-            
-            """ self.l1 = nn.Linear(encoding_input_dim, self.hidden_dim)
-            self.l2 = nn.Linear(self.hidden_dim, self.hidden_dim)
-            self.l3 = nn.Linear(self.hidden_dim, self.hidden_dim)
-            self.l4 = nn.Linear(self.hidden_dim, self.latent_dim)
-            self.l5 = nn.Linear(self.latent_dim, self.hidden_dim)
-            self.l6 = nn.Linear(self.hidden_dim, self.hidden_dim)
-            self.l7 = nn.Linear(self.hidden_dim, self.hidden_dim)
-            self.l8 = nn.Linear(self.hidden_dim, self.output_feature)
-            self.encoding_layer = nn.Sequential(
-                self.l1,
-                nn.LeakyReLU(0.1),
-                self.l2,
-                nn.LeakyReLU(0.1),
-                self.l3,
-                nn.LeakyReLU(0.1),
-                self.l4,
-            )  
-            self.decoding_layer = nn.Sequential(
-                self.l5,
-                nn.LeakyReLU(0.1),
-                self.l6,
-                nn.LeakyReLU(0.1),
-                self.l7,
-                nn.LeakyReLU(0.1),
-                self.l8
-            ) """
+            self.norm_layer = True
+            if self.norm_layer:
+                e_structure, d_structure = (e_layers, e_activation, e_norm), (d_layers, d_activation, d_norm)
+            else:
+                e_structure, d_structure = (e_layers, e_activation), (d_layers, d_activation)
+            self.encoding_layer = nn.Sequential(*list(itertools.chain(*itertools.zip_longest(*e_structure)))[:-len(e_structure)+1])
+            self.decoding_layer = nn.Sequential(*list(itertools.chain(*itertools.zip_longest(*d_structure)))[:-len(d_structure)+1])
             
         elif activation == 'tanh':
             self.encoding_layer = nn.Sequential(
@@ -938,4 +918,65 @@ class FEAE(pyodBase.BaseDetector):
         attentions = torch.t(attentions) # (h x k) x 1 dimensions
         
         X = torch.concatenate((X, attentions), dim=-1)
+
+# AE with pyod API
+class AE_pyod(pyodBase.BaseDetector):
+    def __init__(self, contamination=0.1, latent_dim:int=4, epochs:int=200, lr=1e-3, wd=0e-5):
+        super(AE_pyod, self).__init__(contamination)
+        self.latent_dim = latent_dim
+        self.epochs = epochs
+        self.lr, self.wd = lr, wd
+        
+    def fit(self, X):
+        self.model = AutoEncoder(num_feature=X.shape[-1], latent_dim=self.latent_dim)
+        batch_size = math.ceil(X.shape[0]/10)
+        grad_limit = 2e2
+        
+        optimizer = torch.optim.SGD(self.model.parameters(), lr=self.lr, weight_decay=self.wd)
+        criterion = nn.MSELoss(reduction='sum')
+        
+        for epoch in range(self.epochs):
+            loss, l = 0, X.shape[0]
+            permutation = np.random.permutation(l)
+            for i in range(0, l, batch_size):
+                    
+                batch_idc = permutation[i:i+batch_size]
+                batch_X = X[batch_idc,]
+                batch_X = torch.tensor(batch_X, dtype=torch.float32)
+                batch_Y = batch_X
+                
+                optimizer.zero_grad()
+                # compute reconstructions
+                outputs = self.model(batch_X) 
+                # compute training reconstruction loss
+                sm = nn.Softmax(dim=-1)
+                train_loss = criterion(outputs, batch_Y)
+                #train_loss = torch.sum(torch.sum((outputs-batch_Y)**2))
+                if self.model.error:
+                    train_loss += self.model.error
+                    
+                train_loss.backward(retain_graph=False)
+                loss += train_loss.item()
+                # compute accumulated gradients
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), grad_limit)
+                # perform parameter update based on current gradients
+                optimizer.step()
+                
+            loss /= l
+            if (epoch + 1)%100 == 0:
+                print("epoch : {}/{}, loss = {:.6f}".format(epoch + 1, self.epochs, loss))
+        
+        temp = torch.tensor(X).to(torch.float32)
+        train_loss = torch.sum((self.model(temp)-temp)**2, dim=1).detach().numpy()
+        self.decision_scores_ = train_loss.ravel()
+        self._process_decision_scores()
+        return self
+    
+    def decision_function(self, X):
+        temp = torch.tensor(X).to(torch.float32)
+        train_loss = torch.sum((self.model(temp)-temp)**2, dim=1)
+        return train_loss.detach().numpy()
+    
+    def predict(self, X, return_confidence=False):
+        return self.decision_function(X) > self.threshold_
 

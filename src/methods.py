@@ -47,7 +47,7 @@ def loadData(dataName):
         anomalous_raw = np.loadtxt('../data/network_flow2_attack_data.csv', skiprows=1, delimiter=',')[:,:-1]
     return raw_data, anomalous_raw
 
-def preProcessData_OneClass(raw_data:np.array, anomalous_data:np.array, split:tuple or list=(0.8, 0.1, 0.1), trim:bool=False, trim_threshold:float=0.96, normalize:bool=True, normalization_scheme:str='standard_scaling', cross_validation:bool=False, filterLinearDependencies:bool = True, filter_threshold:float=0.98, removeNoise:bool=False, noise_threshold:float=3, categorical_data_index=None, discretize=False, return_dict={}, args=None):
+def preProcessData_OneClass(raw_data:np.array, anomalous_data:np.array, split:tuple or list=(0.9, 0.05, 0.05), trim:bool=False, trim_threshold:float=0.96, normalize:bool=True, normalization_scheme:str='standard_scaling', cross_validation:bool=False, filterLinearDependencies:bool = True, filter_threshold:float=0.98, removeNoise:bool=False, noise_threshold:float=3, categorical_data_index=None, discretize=False, return_dict={}, args=None):
 
     if sum(split) != 1:
         return ValueError('\'split\' must sum to 1.')
